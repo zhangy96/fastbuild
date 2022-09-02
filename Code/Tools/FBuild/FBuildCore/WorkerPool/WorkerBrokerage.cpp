@@ -12,6 +12,7 @@
 #include "Tools/FBuild/FBuildCore/FBuildVersion.h"
 #include "Tools/FBuild/FBuildCore/FLog.h"
 #include "Tools/FBuild/FBuildWorker/Worker/WorkerSettings.h"
+#include "Tools/FBuild/FBuildCore/WorkerPool/WorkerConnectionPool.h"
 
 // Core
 #include "Core/Env/Env.h"
@@ -24,6 +25,48 @@
 #include "Core/Strings/AStackString.h"
 #include "Core/Process/Thread.h"
 #include "Core/Time/Time.h"
+#include "Core/Tracing/Tracing.h"
+
+#if defined( __APPLE__ )
+
+#include <sys/socket.h>
+#include <ifaddrs.h>
+#include <string.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+
+static bool ConvertHostNameToLocalIP4( AString& hostName )
+{
+    bool result = false;
+
+    struct ifaddrs * allIfAddrs;
+    if ( getifaddrs( &allIfAddrs ) == 0 )
+    {
+        struct ifaddrs * addr = allIfAddrs;
+        char ipString[48] = { 0 };
+        while ( addr )
+        {
+            if ( addr->ifa_addr )
+            {
+                if ( addr->ifa_addr->sa_family == AF_INET && strcmp( addr->ifa_name, "en0" ) == 0 )
+                {
+                    struct sockaddr_in * sockaddr = ( struct sockaddr_in * ) addr->ifa_addr;
+                    inet_ntop( AF_INET, &sockaddr->sin_addr, ipString, sizeof( ipString ) );
+                    hostName = ipString;
+                    result = true;
+                    break;
+                }
+            }
+            addr = addr->ifa_next;
+        }
+
+        freeifaddrs( allIfAddrs );
+    }
+
+    return result;
+}
+
+#endif // __APPLE__
 
 // Constants
 //------------------------------------------------------------------------------
@@ -38,6 +81,9 @@ WorkerBrokerage::WorkerBrokerage()
     : m_Availability( false )
     , m_BrokerageInitialized( false )
     , m_SettingsWriteTime( 0 )
+    , m_ConnectionPool( nullptr )
+    , m_Connection( nullptr )
+    , m_WorkerListUpdateReady( false )
 {
 }
 
@@ -52,63 +98,49 @@ void WorkerBrokerage::InitBrokerage()
         return;
     }
 
-    // brokerage path includes version to reduce unnecessary comms attempts
-    const uint32_t protocolVersion = Protocol::PROTOCOL_VERSION_MAJOR;
+    Network::GetHostName(m_HostName);
 
-    // root folder
-    AStackString<> brokeragePath;
-    if ( Env::GetEnvVariable( "FASTBUILD_BROKERAGE_PATH", brokeragePath ) )
+#if defined( __APPLE__ )
+    ConvertHostNameToLocalIP4(m_HostName);
+#endif
+
+    if ( m_CoordinatorAddress.IsEmpty() == true )
     {
-        // FASTBUILD_BROKERAGE_PATH can contain multiple paths separated by semi-colon. The worker will register itself into the first path only but
-        // the additional paths are paths to additional broker roots allowed for finding remote workers (in order of priority)
-        const char * start = brokeragePath.Get();
-        const char * end = brokeragePath.GetEnd();
-        AStackString<> pathSeparator( ";" );
-        while ( true )
+        AStackString<> coordinator;
+        if ( Env::GetEnvVariable( "FASTBUILD_COORDINATOR", coordinator ) )
         {
-            AStackString<> root;
-            AStackString<> brokerageRoot;
-
-            const char * separator = brokeragePath.Find( pathSeparator, start, end );
-            if ( separator != nullptr )
-            {
-                root.Append( start, (size_t)( separator - start ) );
-            }
-            else
-            {
-                root.Append( start, (size_t)( end - start ) );
-            }
-            root.TrimStart( ' ' );
-            root.TrimEnd( ' ' );
-            // <path>/<group>/<version>/
-            #if defined( __WINDOWS__ )
-                brokerageRoot.Format( "%s\\main\\%u.windows\\", root.Get(), protocolVersion );
-            #elif defined( __OSX__ )
-                brokerageRoot.Format( "%s/main/%u.osx/", root.Get(), protocolVersion );
-            #else
-                brokerageRoot.Format( "%s/main/%u.linux/", root.Get(), protocolVersion );
-            #endif
-
-            m_BrokerageRoots.Append( brokerageRoot );
-            if ( !m_BrokerageRootPaths.IsEmpty() )
-            {
-                m_BrokerageRootPaths.Append( pathSeparator );
-            }
-
-            m_BrokerageRootPaths.Append( brokerageRoot );
-
-            if ( separator != nullptr )
-            {
-                start = separator + 1;
-            }
-            else
-            {
-                break;
-            }
+            m_CoordinatorAddress = coordinator;
         }
     }
 
-    Network::GetHostName( m_HostName );
+    if ( m_CoordinatorAddress.IsEmpty() == true )
+    {
+        OUTPUT( "Using brokerage folder\n" );
+
+        // brokerage path includes version to reduce unnecssary comms attempts
+        uint32_t protocolVersion = Protocol::PROTOCOL_VERSION;
+
+        // root folder
+        AStackString<> root;
+        if ( Env::GetEnvVariable( "FASTBUILD_BROKERAGE_PATH", root ) )
+        {
+            // <path>/<group>/<version>/
+            #if defined( __WINDOWS__ )
+                m_BrokerageRoot.Format( "%s\\main\\%u.windows\\", root.Get(), protocolVersion );
+            #elif defined( __OSX__ )
+                m_BrokerageRoot.Format( "%s/main/%u.osx/", root.Get(), protocolVersion );
+            #else
+                m_BrokerageRoot.Format( "%s/main/%u.linux/", root.Get(), protocolVersion );
+            #endif
+        }
+
+        AStackString<> filePath;
+        m_BrokerageFilePath.Format( "%s%s", m_BrokerageRoot.Get(), m_HostName.Get() );
+    }
+    else
+    {
+        OUTPUT( "Using coordinator\n" );
+    }
 
     UpdateBrokerageFilePath();
 
@@ -153,48 +185,103 @@ void WorkerBrokerage::FindWorkers( Array< AString > & workerList )
 
     // Init the brokerage
     InitBrokerage();
-    if ( m_BrokerageRoots.IsEmpty() )
+    if ( m_BrokerageRoot.IsEmpty() && m_CoordinatorAddress.IsEmpty() )
     {
-        FLOG_WARN( "No brokerage root; did you set FASTBUILD_BROKERAGE_PATH?" );
+        FLOG_WARN( "No brokerage root and no coordinator available; did you set FASTBUILD_BROKERAGE_PATH or launched with -coordinator param?" );
         return;
     }
 
-    Array< AString > results( 256, true );
-    for( AString& root : m_BrokerageRoots )
+
+    if ( ConnectToCoordinator() )
     {
-        const size_t filesBeforeSearch = results.GetSize();
-        if ( !FileIO::GetFiles( root,
+        m_WorkerListUpdateReady = false;
+
+
+        OUTPUT( "Requesting worker list\n");
+
+        Protocol::MsgRequestWorkerList msg;
+        msg.Send( m_Connection );
+
+
+        while ( m_WorkerListUpdateReady == false )
+        {
+            Thread::Sleep( 1 );
+        }
+
+        DisconnectFromCoordinator();
+
+        OUTPUT( "Worker list received: %u workers\n", (uint32_t)m_WorkerListUpdate.GetSize() );
+        if ( m_WorkerListUpdate.GetSize() == 0 )
+        {
+            FLOG_WARN( "No workers received from coordinator" );
+            return; // no files found
+        }
+
+        // presize
+        if ( ( workerList.GetSize() + m_WorkerListUpdate.GetSize() ) > workerList.GetCapacity() )
+        {
+            workerList.SetCapacity( workerList.GetSize() + m_WorkerListUpdate.GetSize() );
+        }
+
+        // convert worker strings
+        const uint32_t * const end = m_WorkerListUpdate.End();
+        for ( uint32_t * it = m_WorkerListUpdate.Begin(); it != end; ++it )
+        {
+            AStackString<> workerName;
+            TCPConnectionPool::GetAddressAsString( *it, workerName );
+            if ( workerName.CompareI( m_HostName ) != 0 && workerName.CompareI( "127.0.0.1" ) )
+            {
+                workerList.Append( workerName );
+            }
+            else
+            {
+                OUTPUT( "Skipping woker %s\n", workerName.Get() );
+            }
+        }
+
+        m_WorkerListUpdate.Clear();
+    }
+    else if ( !m_BrokerageRoot.IsEmpty() )
+    {
+        Array< AString > results( 256, true );
+        if ( !FileIO::GetFiles( m_BrokerageRoot,
                                 AStackString<>( "*" ),
                                 false,
                                 &results ) )
         {
-            FLOG_WARN( "No workers found in '%s'", root.Get() );
+            FLOG_WARN( "No workers found in '%s'", m_BrokerageRoot.Get() );
+            return; // no files found
         }
-        else
+
+        // presize
+        if ( ( workerList.GetSize() + results.GetSize() ) > workerList.GetCapacity() )
         {
-            FLOG_WARN( "%zu workers found in '%s'", results.GetSize() - filesBeforeSearch, root.Get() );
+            workerList.SetCapacity( workerList.GetSize() + results.GetSize() );
         }
-    }
 
-    // presize
-    if ( ( workerList.GetSize() + results.GetSize() ) > workerList.GetCapacity() )
-    {
-        workerList.SetCapacity( workerList.GetSize() + results.GetSize() );
-    }
-
-    // convert worker strings
-    const AString * const end = results.End();
-    for ( AString * it = results.Begin(); it != end; ++it )
-    {
-        const AString & fileName = *it;
-        const char * lastSlash = fileName.FindLast( NATIVE_SLASH );
-        AStackString<> workerName( lastSlash + 1 );
-        if ( workerName.CompareI( m_HostName ) != 0 )
+        // convert worker strings
+        const AString * const end = results.End();
+        for ( AString * it = results.Begin(); it != end; ++it )
         {
-            workerList.Append( workerName );
+            const AString & fileName = *it;
+            const char * lastSlash = fileName.FindLast( NATIVE_SLASH );
+            AStackString<> workerName( lastSlash + 1 );
+            if ( workerName.CompareI( m_HostName ) != 0 )
+            {
+                workerList.Append( workerName );
+            }
         }
     }
 }
+
+// UpdateWorkerList
+//------------------------------------------------------------------------------
+void WorkerBrokerage::UpdateWorkerList( Array< uint32_t > &workerListUpdate )
+{
+    m_WorkerListUpdate.Swap( workerListUpdate );
+    m_WorkerListUpdateReady = true;
+}
+
 
 // SetAvailability
 //------------------------------------------------------------------------------
@@ -204,7 +291,7 @@ void WorkerBrokerage::SetAvailability( bool available )
     InitBrokerage();
 
     // ignore if brokerage not configured
-    if ( m_BrokerageRoots.IsEmpty() )
+    if ( m_BrokerageRoot.IsEmpty() && m_CoordinatorAddress.IsEmpty() )
     {
         return;
     }
@@ -215,129 +302,53 @@ void WorkerBrokerage::SetAvailability( bool available )
         const float elapsedTime = m_TimerLastUpdate.GetElapsed();
         if ( elapsedTime >= sBrokerageAvailabilityUpdateTime )
         {
-            // If settings have changed, (re)create the file 
-            // If settings have not changed, update the modification timestamp
-            const WorkerSettings & workerSettings = WorkerSettings::Get();
-            const uint64_t settingsWriteTime = workerSettings.GetSettingsWriteTime();
-            bool createBrokerageFile = ( settingsWriteTime > m_SettingsWriteTime );
-
-            // Check IP last update time and determine if host name or IP address has changed
-            if ( m_IPAddress.IsEmpty() || ( m_TimerLastIPUpdate.GetElapsed() >= sBrokerageIPAddressUpdateTime ) )
+            if ( ConnectToCoordinator() )
             {
-                AStackString<> hostName;
-                AStackString<> domainName;
-                AStackString<> ipAddress;
 
-                // Get host and domain name as FQDN could have changed
-                Network::GetHostName( hostName );
-                Network::GetDomainName( domainName );
-
-                // Resolve host name to ip address
-                const uint32_t ip = Network::GetHostIPFromName( hostName );
-                if ( ( ip != 0 ) && ( ip != 0x0100007f ) )
-                {
-                    TCPConnectionPool::GetAddressAsString( ip, ipAddress );
-                }
-
-                if ( ( hostName != m_HostName ) || ( domainName != m_DomainName ) || ( ipAddress != m_IPAddress ) )
-                {
-                    m_HostName = hostName;
-                    m_DomainName = domainName;
-                    m_IPAddress = ipAddress;
-
-                    // Remove existing brokerage file, as filename is being updated
-                    FileIO::FileDelete( m_BrokerageFilePath.Get() );
-
-                    // Update brokerage path
-                    UpdateBrokerageFilePath();
-
-                    // Host name, domain name, or IP address changed - create the file
-                    createBrokerageFile = true;
-                }
-
-                // Restart the IP timer
-                m_TimerLastIPUpdate.Start();
+                Protocol::MsgSetWorkerStatus msg( available );
+                msg.Send( m_Connection );
+                DisconnectFromCoordinator();
             }
-
-            if ( createBrokerageFile == false )
+            else
             {
-                // Update the modified time
-                // (Allows an external process to delete orphaned files (from crashes/terminated workers)
-                if ( FileIO::SetFileLastWriteTimeToNow( m_BrokerageFilePath ) == false )
+                //
+                // Ensure that the file will be recreated if cleanup is done on the brokerage path.
+                //
+                if ( !FileIO::FileExists( m_BrokerageFilePath.Get() ) )
                 {
-                    // Failed to update time - try to create or recreate the file
-                    createBrokerageFile = true;
+                    FileIO::EnsurePathExists( m_BrokerageRoot );
+                    // create file to signify availability
+                    FileStream fs;
+                    fs.Open( m_BrokerageFilePath.Get(), FileStream::WRITE_ONLY );
+
+
+                    // Restart the timer
+                    m_TimerLastUpdate.Start();
                 }
             }
-
-            if ( createBrokerageFile )
-            {
-                // Version
-                AStackString<> buffer;
-                buffer.AppendFormat( "Version: %s\n", FBUILD_VERSION_STRING );
-
-                // Username
-                AStackString<> userName;
-                Env::GetLocalUserName( userName );
-                buffer.AppendFormat( "User: %s\n", userName.Get() );
-
-                // Host Name
-                buffer.AppendFormat( "Host Name: %s\n", m_HostName.Get() );
-
-                if ( !m_DomainName.IsEmpty() )
-                {
-                    // Domain Name
-                    buffer.AppendFormat( "Domain Name: %s\n", m_DomainName.Get() );
-
-                    // Fully Quantified Domain Name
-                    buffer.AppendFormat( "FQDN: %s.%s\n", m_HostName.Get(), m_DomainName.Get() );
-                }
-
-                // IP Address
-                buffer.AppendFormat( "IPv4 Address: %s\n", m_IPAddress.Get() );
-
-                // CPU Thresholds
-                static const uint32_t numProcessors = Env::GetNumProcessors();
-                buffer.AppendFormat( "CPUs: %u/%u\n", workerSettings.GetNumCPUsToUse(), numProcessors );
-
-                // Memory Threshold
-                buffer.AppendFormat( "Memory: %u\n", workerSettings.GetMinimumFreeMemoryMiB() );
-
-                // Mode
-                switch ( workerSettings.GetMode() )
-                {
-                    case WorkerSettings::DISABLED:      buffer += "Mode: disabled\n";     break;
-                    case WorkerSettings::WHEN_IDLE:     buffer.AppendFormat( "Mode: idle @ %u%%\n", workerSettings.GetIdleThresholdPercent() ); break;
-                    case WorkerSettings::DEDICATED:     buffer += "Mode: dedicated\n";    break;
-                    case WorkerSettings::PROPORTIONAL:  buffer += "Mode: proportional\n"; break;
-                }
-
-                // Create/write file which signifies availability
-                FileIO::EnsurePathExists( m_BrokerageRoots[0] );
-                FileStream fs;
-                if ( fs.Open( m_BrokerageFilePath.Get(), FileStream::WRITE_ONLY ) )
-                {
-                    fs.WriteBuffer( buffer.Get(), buffer.GetLength() );
-
-                    // Take note of time we wrote the settings
-                    m_SettingsWriteTime = settingsWriteTime;
-                }
-            }
-
-            // Restart the timer
-            m_TimerLastUpdate.Start();
         }
     }
     else if ( m_Availability != available )
     {
-        // remove file to remove availability
-        FileIO::FileDelete( m_BrokerageFilePath.Get() );
+        if ( ConnectToCoordinator() )
+        {
+            Protocol::MsgSetWorkerStatus msg( available );
+            msg.Send( m_Connection );
+            DisconnectFromCoordinator();
+        }
+        else
+        {
+            // remove file to remove availability
+            FileIO::FileDelete( m_BrokerageFilePath.Get() );
+        }
 
         // Restart the timer
         m_TimerLastUpdate.Start();
     }
+
     m_Availability = available;
     
+    /*
     // Handle brokerage cleaning
     if ( m_TimerLastCleanBroker.GetElapsed() >= sBrokerageElapsedTimeBetweenClean )
     {
@@ -365,6 +376,7 @@ void WorkerBrokerage::SetAvailability( bool available )
         // Restart the timer
         m_TimerLastCleanBroker.Start();
     }
+    */
 }
 
 //------------------------------------------------------------------------------
@@ -382,6 +394,44 @@ void WorkerBrokerage::UpdateBrokerageFilePath()
         {
             m_BrokerageFilePath.Format( "%s%s", m_BrokerageRoots[0].Get(), m_HostName.Get() );
         }
+    }
+}
+
+// ConnectToCoordinator
+//------------------------------------------------------------------------------
+bool WorkerBrokerage::ConnectToCoordinator()
+{
+    if ( m_CoordinatorAddress.IsEmpty() == false )
+    {
+        m_ConnectionPool = FNEW( WorkerConnectionPool );
+        m_Connection = m_ConnectionPool->Connect( m_CoordinatorAddress, Protocol::COORDINATOR_PORT, 2000, this ); // 2000ms connection timeout
+        if ( m_Connection == nullptr )
+        {
+            OUTPUT( "Failed to connect to the coordinator at %s\n", m_CoordinatorAddress.Get() );
+            FDELETE m_ConnectionPool;
+            m_ConnectionPool = nullptr;
+            // m_CoordinatorAddress.Clear();
+            return false;
+        }
+
+        OUTPUT( "Connected to the coordinator\n" );
+        return true;
+    }
+
+    return false;
+}
+
+// DisconnectFromCoordinator
+//------------------------------------------------------------------------------
+void WorkerBrokerage::DisconnectFromCoordinator()
+{
+    if ( m_ConnectionPool )
+    {
+        FDELETE m_ConnectionPool;
+        m_ConnectionPool = nullptr;
+        m_Connection = nullptr;
+
+        OUTPUT( "Disconnected from the coordinator\n" );
     }
 }
 
