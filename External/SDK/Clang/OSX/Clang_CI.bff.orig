@@ -33,7 +33,6 @@ Compiler( 'Compiler-Clang12' )
                                     + ' -D__OSX__'      // Platform define
                                     + ' -D__APPLE__'    // Platform define
                                     + ' -D__X64__'      // Architecture define
-                                    + ' -mmacosx-version-min=10.14'
 
                                     // Include paths
                                     + ' -I./'
@@ -57,7 +56,7 @@ Compiler( 'Compiler-Clang12' )
 
     // Linker
     .Linker                         = 'CLANGXX_BINARY'
-    .LinkerOptions                  = '"%1" -framework Cocoa -o "%2" -g'
+    .LinkerOptions                  = '"%1" -o "%2" -g -arch x86_64'
 
     // File Extensions
     .LibExtension                   = '.a'

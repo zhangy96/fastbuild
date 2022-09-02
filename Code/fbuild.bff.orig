@@ -408,7 +408,6 @@ Settings
 // FBuild
 #include "Tools\FBuild\FBuildCore\FBuildCore.bff"
 #include "Tools\FBuild\FBuild\FBuild.bff"
-#include "Tools\FBuild\FBuildCoordinator\FBuildCoordinator.bff"
 #include "Tools\FBuild\FBuildWorker\FBuildWorker.bff"
 #include "Tools\FBuild\FBuildTest\FBuildTest.bff"
 #include "Tools\FBuild\BFFFuzzer\BFFFuzzer.bff"
@@ -426,10 +425,10 @@ ForEach( .BuildConfig in .BuildConfigs )
 //------------------------------------------------------------------------------
 Alias( 'Exes' )
 {
-    .Targets    = { 'FBuildWorker-Debug',      'FBuildWorker-Profile',      'FBuildWorker-Release'
-                    'FBuildApp-Debug',         'FBuildApp-Profile',         'FBuildApp-Release'
-                    'FBuildCoordinator-Debug', 'FBuildCoordinator-Profile', 'FBuildCoordinator-Release' }
+    .Targets    = { 'FBuildWorker-Debug',   'FBuildWorker-Profile', 'FBuildWorker-Release'
+                    'FBuild-Debug',         'FBuild-Profile',       'FBuild-Release' }
 }
+
 // Aliases : All-$Platform$
 //------------------------------------------------------------------------------
 .Platforms = { 'x64', 'x64Clang', 'x64Linux', 'x64ClangLinux', 'x64OSX', 'ARMOSX' }
@@ -613,7 +612,7 @@ Alias( 'All+Tests' )
 
         // Work around for Visual Studio F5 behaviour up-to-date check
         .Deps               = [
-                                .Projects = { 'CoreTest-proj', 'FBuildTest-proj', 'FBuildApp-proj', 'FBuildWorker-proj', 'FBuildCoordinator-proj' }
+                                .Projects = { 'CoreTest-proj', 'FBuildTest-proj', 'FBuild-proj', 'FBuildWorker-proj' }
                                 .Dependencies = { 'All-proj' }
                               ]
         .SolutionDependencies = { .Deps }
@@ -644,7 +643,7 @@ Alias( 'All+Tests' )
         .Folder_Apps =
         [
             .Path           = 'Apps'
-            .Projects       = { 'FBuildApp-proj', 'FBuildWorker-proj', 'FBuildCoordinator-proj' }
+            .Projects       = { 'FBuild-proj', 'FBuildWorker-proj' }
         ]
         .SolutionFolders    = { .Folder_Config, .Folder_External, .Folder_Test, .Folder_Libs, .Folder_Apps }
     }
@@ -664,7 +663,6 @@ Alias( 'All+Tests' )
         .ProjectFiles               = { 'Core-xcodeproj'
                                         'CoreTest-xcodeproj'
                                         'FBuild-xcodeproj'
-                                        'FBuildCoordinator-xcodeproj'
                                         'FBuildCore-xcodeproj'
                                         'FBuildTest-xcodeproj'
                                         'FBuildWorker-xcodeproj'
