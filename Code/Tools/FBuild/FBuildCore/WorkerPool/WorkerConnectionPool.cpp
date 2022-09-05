@@ -57,7 +57,7 @@ void WorkerConnectionPool::OnReceive( const ConnectionInfo * connection, void * 
     }
 
     const Protocol::IMessage * imsg = m_CurrentMessage;
-    Protocol::MessageType messageType = imsg->GetType();
+    const Protocol::MessageType messageType = imsg->GetType();
 
     PROTOCOL_DEBUG( "Coordinator : %u (%s)\n", messageType, GetProtocolMessageDebugName( messageType ) );
 
@@ -133,7 +133,7 @@ void WorkerConnectionPool::Process( const ConnectionInfo * connection, const Pro
         }
     }
 
-    Protocol::MsgWorkerList resultMsg;
+    const Protocol::MsgWorkerList resultMsg;
     resultMsg.Send( connection, ms );
 }
 

@@ -29,7 +29,8 @@
             Print( '----------------------------------------------------------------------' )
             Print( '- Unable to auto-detect Clang - please specify installation manually -' )
             Print( '----------------------------------------------------------------------' )
-            .Clang14_BasePath = .Set_Path_Here    // <-- Set path here
+            .Clang14_BasePath = 'C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/Llvm/'    // <-- Set path here
+            .Clang14_Version  = '14.x.x'
         #endif
     #endif
 #endif
@@ -46,7 +47,6 @@ Compiler( 'Compiler-Clang14' )
                                         '$Root$/bin/concrt140.dll'
                                         '$Root$/bin/msvcp140.dll'
                                         '$Root$/bin/vcruntime140.dll'
-                                        '$Root$/bin/vcruntime140_1.dll'
                                       }
     .Executable                     = '$Root$\bin\clang-cl.exe'
 

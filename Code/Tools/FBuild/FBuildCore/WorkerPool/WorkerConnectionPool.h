@@ -41,7 +41,7 @@ class WorkerConnectionPool : public TCPConnectionPool
 {
 public:
     WorkerConnectionPool();
-    virtual ~WorkerConnectionPool();
+    virtual ~WorkerConnectionPool() override;
 
 private:
     // network events - NOTE: these happen in another thread! (but never at the same time)

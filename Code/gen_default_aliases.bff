@@ -3,7 +3,7 @@
 // Per-Config
 #if __WINDOWS__
 Alias( '$ProjectName$-Debug' )           { .Targets = { '$ProjectName$-X64-Debug', '$ProjectName$-X64Clang-Debug' } }
-Alias( '$ProjectName$-Analyze' )         { .Targets = { '$ProjectName$-X64-Analyze' } }
+Alias( '$ProjectName$-Analyze' )         { .Targets = { '$ProjectName$-X64-Analyze', '$ProjectName$-X64Clang-Anlyze' } }
 Alias( '$ProjectName$-Profile' )         { .Targets = { '$ProjectName$-X64-Profile', '$ProjectName$-X64Clang-Profile' } }
 Alias( '$ProjectName$-Release' )         { .Targets = { '$ProjectName$-X64-Release', '$ProjectName$-X64Clang-Release' } }
 #endif

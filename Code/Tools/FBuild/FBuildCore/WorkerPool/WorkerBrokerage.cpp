@@ -71,16 +71,16 @@ static bool ConvertHostNameToLocalIP4( AString& hostName )
 // Constants
 //------------------------------------------------------------------------------
 static const float sBrokerageElapsedTimeBetweenClean = ( 12 * 60 * 60.0f );
-static const uint32_t sBrokerageCleanOlderThan = ( 24 * 60 * 60 );
+//static const uint32_t sBrokerageCleanOlderThan = ( 24 * 60 * 60 );
 static const float sBrokerageAvailabilityUpdateTime = ( 10.0f );
-static const float sBrokerageIPAddressUpdateTime = ( 5 * 60.0f );
+//static const float sBrokerageIPAddressUpdateTime = ( 5 * 60.0f );
 
 // CONSTRUCTOR
 //------------------------------------------------------------------------------
 WorkerBrokerage::WorkerBrokerage()
     : m_Availability( false )
     , m_BrokerageInitialized( false )
-    , m_SettingsWriteTime( 0 )
+    //, m_SettingsWriteTime( 0 )
     , m_ConnectionPool( nullptr )
     , m_Connection( nullptr )
     , m_WorkerListUpdateReady( false )
@@ -118,24 +118,25 @@ void WorkerBrokerage::InitBrokerage()
         OUTPUT( "Using brokerage folder\n" );
 
         // brokerage path includes version to reduce unnecssary comms attempts
-        uint32_t protocolVersion = Protocol::PROTOCOL_VERSION;
+        const uint32_t protocolVersion = Protocol::PROTOCOL_VERSION_MAJOR;
 
         // root folder
         AStackString<> root;
+        AStackString<> brokerageRoot;
         if ( Env::GetEnvVariable( "FASTBUILD_BROKERAGE_PATH", root ) )
         {
             // <path>/<group>/<version>/
             #if defined( __WINDOWS__ )
-                m_BrokerageRoot.Format( "%s\\main\\%u.windows\\", root.Get(), protocolVersion );
+                brokerageRoot.Format( "%s\\main\\%u.windows\\", root.Get(), protocolVersion );
             #elif defined( __OSX__ )
-                m_BrokerageRoot.Format( "%s/main/%u.osx/", root.Get(), protocolVersion );
+                brokerageRoot.Format( "%s/main/%u.osx/", root.Get(), protocolVersion );
             #else
-                m_BrokerageRoot.Format( "%s/main/%u.linux/", root.Get(), protocolVersion );
+                brokerageRoot.Format( "%s/main/%u.linux/", root.Get(), protocolVersion );
             #endif
         }
 
         AStackString<> filePath;
-        m_BrokerageFilePath.Format( "%s%s", m_BrokerageRoot.Get(), m_HostName.Get() );
+        m_BrokerageFilePath.Format( "%s%s", brokerageRoot.Get(), m_HostName.Get() );
     }
     else
     {
@@ -185,12 +186,11 @@ void WorkerBrokerage::FindWorkers( Array< AString > & workerList )
 
     // Init the brokerage
     InitBrokerage();
-    if ( m_BrokerageRoot.IsEmpty() && m_CoordinatorAddress.IsEmpty() )
+    if ( m_BrokerageRoots.IsEmpty() && m_CoordinatorAddress.IsEmpty() )
     {
         FLOG_WARN( "No brokerage root and no coordinator available; did you set FASTBUILD_BROKERAGE_PATH or launched with -coordinator param?" );
         return;
     }
-
 
     if ( ConnectToCoordinator() )
     {
@@ -199,7 +199,7 @@ void WorkerBrokerage::FindWorkers( Array< AString > & workerList )
 
         OUTPUT( "Requesting worker list\n");
 
-        Protocol::MsgRequestWorkerList msg;
+        const Protocol::MsgRequestWorkerList msg;
         msg.Send( m_Connection );
 
 
@@ -241,16 +241,23 @@ void WorkerBrokerage::FindWorkers( Array< AString > & workerList )
 
         m_WorkerListUpdate.Clear();
     }
-    else if ( !m_BrokerageRoot.IsEmpty() )
+    else if ( !m_BrokerageRoots.IsEmpty() )
     {
         Array< AString > results( 256, true );
-        if ( !FileIO::GetFiles( m_BrokerageRoot,
-                                AStackString<>( "*" ),
-                                false,
-                                &results ) )
+        for( AString& root : m_BrokerageRoots )
         {
-            FLOG_WARN( "No workers found in '%s'", m_BrokerageRoot.Get() );
-            return; // no files found
+            const size_t filesBeforeSearch = results.GetSize();
+            if ( !FileIO::GetFiles( root,
+                                    AStackString<>( "*" ),
+                                    false,
+                                    &results ) )
+            {
+                FLOG_WARN( "No workers found in '%s'", root.Get() );
+            }
+            else
+            {
+                FLOG_WARN( "%zu workers found in '%s'", results.GetSize() - filesBeforeSearch, root.Get() );
+            }
         }
 
         // presize
@@ -291,7 +298,7 @@ void WorkerBrokerage::SetAvailability( bool available )
     InitBrokerage();
 
     // ignore if brokerage not configured
-    if ( m_BrokerageRoot.IsEmpty() && m_CoordinatorAddress.IsEmpty() )
+    if ( m_BrokerageRoots.IsEmpty() && m_CoordinatorAddress.IsEmpty() )
     {
         return;
     }
@@ -305,7 +312,7 @@ void WorkerBrokerage::SetAvailability( bool available )
             if ( ConnectToCoordinator() )
             {
 
-                Protocol::MsgSetWorkerStatus msg( available );
+                const Protocol::MsgSetWorkerStatus msg( available );
                 msg.Send( m_Connection );
                 DisconnectFromCoordinator();
             }
@@ -316,7 +323,7 @@ void WorkerBrokerage::SetAvailability( bool available )
                 //
                 if ( !FileIO::FileExists( m_BrokerageFilePath.Get() ) )
                 {
-                    FileIO::EnsurePathExists( m_BrokerageRoot );
+                    FileIO::EnsurePathExists( m_BrokerageRoots[0] );
                     // create file to signify availability
                     FileStream fs;
                     fs.Open( m_BrokerageFilePath.Get(), FileStream::WRITE_ONLY );
@@ -332,7 +339,7 @@ void WorkerBrokerage::SetAvailability( bool available )
     {
         if ( ConnectToCoordinator() )
         {
-            Protocol::MsgSetWorkerStatus msg( available );
+            const Protocol::MsgSetWorkerStatus msg( available );
             msg.Send( m_Connection );
             DisconnectFromCoordinator();
         }

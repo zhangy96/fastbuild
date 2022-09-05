@@ -205,7 +205,7 @@ Protocol::MsgFile::MsgFile( uint64_t toolId, uint32_t fileId )
 //------------------------------------------------------------------------------
 Protocol::MsgRequestWorkerList::MsgRequestWorkerList()
     : Protocol::IMessage( Protocol::MSG_REQUEST_WORKER_LIST, sizeof( MsgRequestWorkerList ), false )
-    , m_ProtocolVersion( PROTOCOL_VERSION )
+    , m_ProtocolVersion( PROTOCOL_VERSION_MAJOR )
     , m_Platform(Env::GetPlatform())
 {
 }
@@ -222,7 +222,7 @@ Protocol::MsgWorkerList::MsgWorkerList()
 Protocol::MsgSetWorkerStatus::MsgSetWorkerStatus( bool isAvailable )
     : Protocol::IMessage( Protocol::MSG_SET_WORKER_STATUS, sizeof( MsgSetWorkerStatus ), false )
     , m_IsAvailable( isAvailable )
-    , m_ProtocolVersion( PROTOCOL_VERSION )
+    , m_ProtocolVersion( PROTOCOL_VERSION_MAJOR )
     , m_Platform(Env::GetPlatform())
 {
 }

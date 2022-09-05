@@ -47,7 +47,7 @@ private:
     AString             m_BrokerageFilePath;
     Timer               m_TimerLastUpdate;      // Throttle network access
     Timer               m_TimerLastIPUpdate;    // Throttle dns access
-    uint64_t            m_SettingsWriteTime;    // FileTime of settings time when last changed
+    //uint64_t            m_SettingsWriteTime;    // FileTime of settings time when last changed
     Timer               m_TimerLastCleanBroker;
     AString             m_CoordinatorAddress;
     WorkerConnectionPool * m_ConnectionPool;
