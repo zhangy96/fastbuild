@@ -13,24 +13,30 @@
     .Clang14_BasePath   = '$_CURRENT_BFF_DIR_$/14.0.6'
     .Clang14_Version    = '14.0.6'
 #else
-    #if file_exists( "C:/Program Files (x86)/Microsoft Visual Studio/2019/Enterprise/VC/Tools/LLVM/x64/bin/clang-cl.exe" )
+    #if file_exists( "C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/Llvm/x64/bin/clang-cl.exe" )
         // Installed with VS2019
-        .Clang14_BasePath = 'C:/Program Files (x86)/Microsoft Visual Studio/2019/Enterprise/VC/Tools/LLVM/x64'
+        .Clang14_BasePath = 'C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/Llvm/x64'
         .Clang14_Version    = '14.x.x'
     #else
-        #if file_exists( "C:/Program Files/LLVM/bin/clang-cl.exe" )
-            // Default Install
-            .Clang14_BasePath = 'C:/Program Files/LLVM'
+        #if file_exists( "C:/Program Files (x86)/Microsoft Visual Studio/2019/Enterprise/VC/Tools/LLVM/x64/bin/clang-cl.exe" )
+            // Installed with VS2022
+            .Clang14_BasePath = 'C:/Program Files (x86)/Microsoft Visual Studio/2019/Enterprise/VC/Tools/LLVM/x64'
             .Clang14_Version    = '14.x.x'
         #else
-            //
-            // Failed
-            //
-            Print( '----------------------------------------------------------------------' )
-            Print( '- Unable to auto-detect Clang - please specify installation manually -' )
-            Print( '----------------------------------------------------------------------' )
-            .Clang14_BasePath = 'C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/Llvm/'    // <-- Set path here
-            .Clang14_Version  = '14.x.x'
+            #if file_exists( "C:/Program Files/LLVM/bin/clang-cl.exe" )
+                // Default Install
+                .Clang14_BasePath = 'C:/Program Files/LLVM'
+                .Clang14_Version    = '14.x.x'
+            #else
+                //
+                // Failed
+                //
+                Print( '----------------------------------------------------------------------' )
+                Print( '- Unable to auto-detect Clang - please specify installation manually -' )
+                Print( '----------------------------------------------------------------------' )
+                .Clang14_BasePath        = .Set_Path_Here    // <-- Set path here
+                .Clang14_Version         = .Set_Version_Here // <-- Set version here
+            #endif
         #endif
     #endif
 #endif
