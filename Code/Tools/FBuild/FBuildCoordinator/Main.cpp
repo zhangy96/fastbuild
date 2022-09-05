@@ -48,7 +48,7 @@ int main(int argc, char * argv[])
     }
 
     // This wrapper is purely for profiling scope
-    int result = Main( args );
+    const int result = Main( args );
     PROFILE_SYNCHRONIZE // make sure no tags are active and do one final sync
     return result;
 }
@@ -65,7 +65,7 @@ int Main( const AString & args )
     }
 
     // only allow 1 worker per system
-    Timer t;
+    const Timer t;
     while ( g_OneProcessMutex.TryLock() == false )
     {
         // retry for upto 2 seconds, to allow some time for old worker to close

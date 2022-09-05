@@ -427,7 +427,7 @@ ForEach( .BuildConfig in .BuildConfigs )
 Alias( 'Exes' )
 {
     .Targets    = { 'FBuildWorker-Debug',      'FBuildWorker-Profile',      'FBuildWorker-Release'
-                    'FBuildApp-Debug',         'FBuildApp-Profile',         'FBuildApp-Release'
+                    'FBuild-Debug',         'FBuild-Profile',         'FBuild-Release'
                     'FBuildCoordinator-Debug', 'FBuildCoordinator-Profile', 'FBuildCoordinator-Release' }
 }
 // Aliases : All-$Platform$
@@ -606,14 +606,14 @@ Alias( 'All+Tests' )
                 .SolutionPlatform   = 'ClangLinux'
                 .Config             = '$SolutionPlatform$-$SolutionConfig$'
             ]
-            ^SolutionConfigs        + .WSLConfig
+            //^SolutionConfigs        + .WSLConfig
         }
 
         .SolutionVisualStudioVersion = '$VS_SolutionVersion$'
 
         // Work around for Visual Studio F5 behaviour up-to-date check
         .Deps               = [
-                                .Projects = { 'CoreTest-proj', 'FBuildTest-proj', 'FBuildApp-proj', 'FBuildWorker-proj', 'FBuildCoordinator-proj' }
+                                .Projects = { 'CoreTest-proj', 'FBuildTest-proj', 'FBuild-proj', 'FBuildWorker-proj', 'FBuildCoordinator-proj' }
                                 .Dependencies = { 'All-proj' }
                               ]
         .SolutionDependencies = { .Deps }
@@ -644,7 +644,7 @@ Alias( 'All+Tests' )
         .Folder_Apps =
         [
             .Path           = 'Apps'
-            .Projects       = { 'FBuildApp-proj', 'FBuildWorker-proj', 'FBuildCoordinator-proj' }
+            .Projects       = { 'FBuild-proj', 'FBuildWorker-proj', 'FBuildCoordinator-proj' }
         ]
         .SolutionFolders    = { .Folder_Config, .Folder_External, .Folder_Test, .Folder_Libs, .Folder_Apps }
     }
