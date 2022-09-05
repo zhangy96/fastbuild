@@ -135,6 +135,9 @@ void WorkerBrokerage::InitBrokerage()
             #endif
         }
 
+        m_BrokerageRoots.Append( brokerageRoot );
+        m_BrokerageRootPaths.Append( brokerageRoot );
+
         AStackString<> filePath;
         m_BrokerageFilePath.Format( "%s%s", brokerageRoot.Get(), m_HostName.Get() );
     }
